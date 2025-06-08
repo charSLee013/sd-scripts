@@ -1,0 +1,14 @@
+# 风格 & 构图
+photograph, elegant, contemporary style, a spacious living room with a high ceiling, natural light flooding in from large windows, clean lines, neutral colors with a pop of vibrant blue from a velvet sofa, minimalist decor --neg low quality, blurry, watermark
+
+# 材质 & 光影
+photograph, professional, detailed, a close-up shot of a modern kitchen countertop made of white marble, a wooden bowl of green apples on the counter, morning sunlight creating soft shadows, sleek design --neg cartoon, illustration, painting
+
+# 复杂场景 & 氛围
+photograph, sophisticated, modern architecture, an open-plan office with glass walls, city view of skyscrapers at dusk, warm lighting from recessed ceiling lights, a cozy atmosphere with indoor plants and comfortable armchairs, people working in the background --neg empty, unrealistic, oversaturated
+
+# 抽象概念 & 对比
+photograph, minimalist design, a single black leather chair in an empty concrete room, a single beam of light from a high window illuminating the chair, creating a dramatic shadow, high contrast, artistic --neg cluttered, colorful, busy
+
+# 综合测试
+photograph, high quality, luxurious, a modern bedroom interior with a large wooden bed, white linen, a private balcony with an ocean view at sunset, soft warm lighting from bedside lamps, calm and serene atmosphere --neg distorted, ugly, bad anatomy 
