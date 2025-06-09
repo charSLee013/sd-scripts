@@ -1,0 +1,100 @@
+[general]
+# general
+# pretrained_model_name_or_path = ""
+# v2 = false
+# v_parameterization = false
+# logging_dir = "./logs"
+# train_data_dir = ""
+# reg_data_dir = ""
+# output_dir = "./output"
+# output_name = ""
+
+[model_arguments]
+pretrained_model_name_or_path = "/root/checkpoints/sd_xl_base_1.0.safetensors"
+v_parameterization = true
+vae = "/root/checkpoints/sdxl_vae.safetensors"
+
+[optimizer_arguments]
+optimizer_type = "AdamW8bit"
+learning_rate = 1e-4
+unet_lr = 1e-4
+text_encoder_lr = 5e-5
+lr_scheduler = "cosine_with_restarts"
+lr_scheduler_num_cycles = 3
+lr_warmup_steps = 500
+# lr_scheduler_power =
+# lr_scheduler_type =
+# lr_scheduler_args =
+
+[dataset_arguments]
+train_data_dir = "/root/data/cluster_4_restructured_v3"
+# reg_data_dir =
+shuffle_caption = true
+keep_tokens = 0
+# resolution = "512,512"
+# color_aug = false
+# flip_aug = false
+# face_crop_aug_range =
+# random_crop = false
+# caption_dropout_rate = 0.0
+# caption_dropout_every_n_epochs = 0
+# caption_tag_dropout_rate = 0.0
+# token_warmup_min = 1
+# token_warmup_step = 0
+
+[training_arguments]
+# optional
+# lowram = false
+output_name = "sdxl-lora-v3-baseline"
+save_precision = "bf16"
+train_batch_size = 2
+max_train_epochs = 10
+save_every_n_epochs = 1
+mixed_precision = "bf16"
+save_model_as = "safetensors"
+# clip_skip = 2
+# max_token_length = 225
+seed = 42
+# max_data_loader_n_workers = 8
+gradient_checkpointing = true
+# full_fp16 = false
+# full_bf16 = false
+# min_snr_gamma = 5
+noise_offset = 0.05
+# multires_noise_iterations =
+# multires_noise_discount =
+xformers = true
+# deepspeed = false
+
+[logging_arguments]
+logging_dir = "./logs"
+log_with = "tensorboard"
+# log_prefix =
+# log_tracker_name =
+# log_tracker_config =
+
+[sample_prompt_arguments]
+sample_every_n_steps = 200
+sample_prompts = "./prompts.txt"
+# sample_sampler = "euler_a"
+
+[advanced_training_arguments]
+min_snr_gamma = 5
+fp8_base = true
+cache_text_encoder_outputs = true
+
+[network_arguments]
+network_module = "networks.lora"
+network_dim = 128
+network_alpha = 64
+# network_weights =
+# network_dropout =
+# network_args =
+# no_half_unfrozen_weights =
+
+[saving_arguments]
+# save_every_n_steps = 0
+# save_last_n_steps = 0
+# save_state = false
+# resume =
+# save_last_n_steps_state = 0 

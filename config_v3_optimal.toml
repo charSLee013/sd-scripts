@@ -10,7 +10,8 @@ vae = "/root/checkpoints/sdxl_vae.safetensors"
 # ================================
 # 数据集配置
 # ================================
-train_data_dir = "/root/data/cluster_4_restructured_v2"
+train_data_dir = "/root/data/cluster_4_restructured_v3"
+reg_data_dir = ""  # 如果不使用正则化数据集可以留空
 output_dir = "./models/sdxl_lora_v3_optimal"
 logging_dir = "./logs/sdxl_lora_v3_optimal"
 
@@ -18,17 +19,18 @@ logging_dir = "./logs/sdxl_lora_v3_optimal"
 # 分辨率和批处理配置
 # ================================
 # SDXL 标准分辨率
-resolution = 1024
+resolution = "1024,1024"
 # 快速验证批处理大小
-train_batch_size = 1
+train_batch_size = 2
 # 梯度累积以提升有效批处理大小
 gradient_accumulation_steps = 4
 
 # ================================
 # 训练轮次和保存配置
 # ================================
-max_train_epochs = 10
-save_every_n_epochs = 2
+# 基于步数训练，而非基于epoch
+max_train_steps = 10000     # 总训练步数为10000
+save_every_n_steps = 500   # 每500步保存一次模型
 save_model_as = "safetensors"
 
 # ================================
@@ -57,7 +59,8 @@ network_train_text_encoder_only = false
 # ================================
 # 优化器配置
 # ================================
-optimizer_type = "AdamW8bit"
+# 由于bitsandbytes安装失败，使用标准AdamW优化器
+optimizer_type = "AdamW"
 optimizer_args = ["weight_decay=0.1", "betas=0.9,0.99"]
 
 # ================================
@@ -82,18 +85,18 @@ multires_noise_discount = 0.3
 # 性能优化配置
 # ================================
 # 混合精度训练
-mixed_precision = "fp16"
+mixed_precision = "bf16"
 # 梯度检查点节省内存
 gradient_checkpointing = true
-# 禁用xformers（用户要求）
-# xformers = false
-# 启用深度学习优化（用户要求）
-# deepspeed = true  # 注：需要在accelerate config中配置
-# 缓存文本编码器输出
-cache_text_encoder_outputs = true
-cache_text_encoder_outputs_to_disk = true
+# 启用xformers以减少内存使用
+xformers = false
+# 已移除DeepSpeed支持（不再使用accelerate启动）
+
+# 缓存文本编码器输出 - 已禁用（与LoRA Text Encoder训练冲突）
+cache_text_encoder_outputs = false
+cache_text_encoder_outputs_to_disk = false
 # SDXL VAE FP32运行以避免NaN
-vae_batch_size = 1
+vae_batch_size = 16
 no_half_vae = true
 
 # ================================
@@ -105,7 +108,7 @@ max_data_loader_n_workers = 2
 # ================================
 # 采样配置
 # ================================
-sample_every_n_epochs = 2
+sample_every_n_steps = 500   # 每500步采样一次
 sample_prompts = "./prompts.txt"
 sample_sampler = "euler_a"
 sample_steps = 20
@@ -123,6 +126,16 @@ ip_noise_gamma = 0.1
 scale_v_pred_loss_like_noise_pred = true
 
 # ================================
+# 提示词处理配置
+# ================================
+# 启用标签随机打乱，提升泛化能力
+shuffle_caption = true
+# 启用通配符和多行提示词
+enable_wildcard = true
+# 使用.txt作为标签文件扩展名
+caption_extension = ".txt"
+
+# ================================
 # 日志和监控
 # ================================
 log_with = "tensorboard"
@@ -131,10 +144,16 @@ log_prefix = "sdxl_lora_v3_optimal"
 # ================================
 # 高级内存优化
 # ================================
-# 启用CPU卸载
-cpu_offload_checkpointing = true
-# 低内存VAE
+# 禁用CPU卸载，直接使用GPU显存
+cpu_offload_checkpointing = false
+# 禁用低内存模式，优先使用显存
 lowvram = false
+highvram = true
+lowram = true
+# 加载模型和VAE到GPU显存，提高训练效率
+use_cpu_only = false  # 确保使用GPU
+vae_in_cpu = false    # VAE直接加载到GPU显存
+train_on_main_process_only = false  # 充分利用所有可用资源
 
 # ================================
 # 实验性功能 (基于最新研究)
@@ -142,7 +161,7 @@ lowvram = false
 # SDXL专用：改善文本-图像对齐
 # 注意：这些参数可能需要根据具体硬件调整
 full_fp16 = false
-fp8_base = false  # 如果显存充足可以开启
+fp8_base = true  # 如果显存不足可以开启
 
 # ================================
 # 正则化配置
@@ -155,7 +174,7 @@ fp8_base = false  # 如果显存充足可以开启
 # Bucket配置 (多分辨率训练)
 # ================================
 enable_bucket = true
-min_bucket_reso = 256
-max_bucket_reso = 1536
+min_bucket_reso = 512
+max_bucket_reso = 4096
 bucket_reso_steps = 64
 bucket_no_upscale = false 

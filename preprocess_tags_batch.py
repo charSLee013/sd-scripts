@@ -3,7 +3,6 @@ import json
 import torch
 import numpy as np
 import argparse
-import shutil
 import math
 from pathlib import Path
 from tqdm import tqdm
@@ -12,13 +11,11 @@ from transformers import CLIPTokenizer, CLIPTextModel
 from sklearn.metrics.pairwise import cosine_similarity
 from PIL import Image, ImageOps
 import warnings
+import sys
 
 # --- 全局配置 ---
 warnings.filterwarnings("ignore")
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-DATA_DIR = "/root/data/cluster_4"
-OUTPUT_DIR = "/root/data/cluster_4_restructured_v3"
-ANALYSIS_FILE = "tag_analysis_results.json"
 TE1_PATH = "/root/text_encoder/clip-vit-large-patch14"
 TE2_PATH = "/root/text_encoder/CLIP-ViT-B-32-laion2B-s34B-b79K"
 
@@ -49,28 +46,27 @@ TAG_ONTOLOGY = {
     "general": []
 }
 
-class TagRestructuringV2:
-    """
-    一个集成了语义重排序、精确Token计算、语义保真度验证和图片处理的
-    高级数据重构工具。支持自动图片压缩和格式统一。
-    """
-    def __init__(self):
-        print("[INFO] 正在初始化数据重构工具 V2.0...")
-        # 图片处理配置
-        self.max_resolution = 5000  # 最大分辨率限制
-        self.output_format = "PNG"  # 统一输出格式
-        print(f"[INFO] 图片处理模式: 真实复制 + 智能压缩 (最大分辨率: {self.max_resolution}x{self.max_resolution})")
+class BatchProcessor:
+    """批次处理器 - 处理单个批次的文件"""
+    
+    def __init__(self, max_resolution=5000, output_format="PNG"):
+        print(f"[BATCH] 初始化批次处理器 (设备: {DEVICE})")
+        self.max_resolution = max_resolution
+        self.output_format = output_format
         self._load_models()
         self._build_tag_mapping()
 
     def _load_models(self):
         """加载TE1和TE2的模型与分词器"""
-        print(f"[INFO] 使用设备: {DEVICE}")
-        self.te1_tokenizer = CLIPTokenizer.from_pretrained(TE1_PATH)
-        self.te1_model = CLIPTextModel.from_pretrained(TE1_PATH).to(DEVICE).eval()
-        self.te2_tokenizer = CLIPTokenizer.from_pretrained(TE2_PATH)
-        self.te2_model = CLIPTextModel.from_pretrained(TE2_PATH).to(DEVICE).eval()
-        print("[INFO] TE1 和 TE2 模型加载完毕。")
+        try:
+            self.te1_tokenizer = CLIPTokenizer.from_pretrained(TE1_PATH)
+            self.te1_model = CLIPTextModel.from_pretrained(TE1_PATH).to(DEVICE).eval()
+            self.te2_tokenizer = CLIPTokenizer.from_pretrained(TE2_PATH)
+            self.te2_model = CLIPTextModel.from_pretrained(TE2_PATH).to(DEVICE).eval()
+            print("[BATCH] CLIP模型加载完成")
+        except Exception as e:
+            print(f"[BATCH ERROR] 模型加载失败: {e}")
+            sys.exit(1)
 
     def _build_tag_mapping(self):
         """构建标签到类别的映射"""
@@ -93,7 +89,7 @@ class TagRestructuringV2:
         return model(**inputs).last_hidden_state.mean(dim=1).cpu().numpy()
 
     def _categorize_and_reorder_tags(self, tags):
-        """对标签进行分类和重排序，不添加额外标记"""
+        """对标签进行分类和重排序"""
         categorized = defaultdict(list)
         for tag in tags:
             tag_lower = tag.lower().strip()
@@ -103,20 +99,19 @@ class TagRestructuringV2:
         reordered_tags = []
         for category in TAG_CATEGORIES_ORDER:
             if category in categorized:
-                # 保持原始大小写，去重
                 unique_tags = sorted(list(set(categorized[category])), key=lambda x: tags.index(x))
                 reordered_tags.extend(unique_tags)
         
         return ", ".join(reordered_tags)
     
     def get_token_counts(self, text):
-        """使用真实分词器计算Token数量"""
+        """计算Token数量"""
         tokens1 = self.te1_tokenizer(text, truncation=False, add_special_tokens=True)['input_ids']
         tokens2 = self.te2_tokenizer(text, truncation=False, add_special_tokens=True)['input_ids']
         return len(tokens1), len(tokens2)
 
     def _find_image_file(self, base_name, source_dir):
-        """大小写不敏感地查找图片文件"""
+        """查找对应的图片文件"""
         source_path = Path(source_dir)
         
         # 直接匹配
@@ -138,34 +133,26 @@ class TagRestructuringV2:
         return None
 
     def _process_image(self, source_image, target_image):
-        """处理图片：检查分辨率、压缩并转换为PNG格式"""
+        """处理图片：压缩并转换格式"""
         if target_image.exists():
             return {"status": "已存在", "compressed": False, "original_size": None, "final_size": None}
         
         try:
-            # 打开并检查图片
             with Image.open(source_image) as img:
                 original_width, original_height = img.size
                 original_size = (original_width, original_height)
                 
-                # 检查是否需要压缩
                 needs_compression = (original_width > self.max_resolution or 
                                    original_height > self.max_resolution)
                 
                 if needs_compression:
-                    # 计算压缩比例，保持宽高比
                     scale_factor = min(self.max_resolution / original_width, 
                                      self.max_resolution / original_height)
                     new_width = int(original_width * scale_factor)
                     new_height = int(original_height * scale_factor)
                     
-                    # 执行压缩
                     img_resized = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                    
-                    # 确保目标文件扩展名为.png
                     target_png = target_image.with_suffix('.png')
-                    
-                    # 保存为PNG格式
                     img_resized.save(target_png, format='PNG', optimize=True)
                     
                     return {
@@ -177,13 +164,9 @@ class TagRestructuringV2:
                         "saved_path": str(target_png)
                     }
                 else:
-                    # 不需要压缩，直接转换为PNG格式
                     target_png = target_image.with_suffix('.png')
-                    
-                    # 转换为RGB模式（如果是RGBA或其他模式）
                     if img.mode in ('RGBA', 'LA', 'P'):
                         img = img.convert('RGB')
-                    
                     img.save(target_png, format='PNG', optimize=True)
                     
                     return {
@@ -204,21 +187,20 @@ class TagRestructuringV2:
                 "error": str(e)
             }
 
-    def run(self):
-        """执行完整的数据重构和验证流程"""
-        if not os.path.exists(OUTPUT_DIR):
-            os.makedirs(OUTPUT_DIR)
-            print(f"[INFO] 已创建输出目录: {OUTPUT_DIR}")
-
-        all_txt_files = list(Path(DATA_DIR).glob("*.txt"))
-        print(f"[INFO] 发现 {len(all_txt_files)} 个标签文件需要处理。")
-
-        report_data = []
+    def process_batch(self, batch_files, source_dir, output_dir, batch_id):
+        """处理单个批次的文件"""
+        print(f"[BATCH-{batch_id}] 开始处理 {len(batch_files)} 个文件")
+        
+        # 确保输出目录存在
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+        
+        batch_results = []
         image_stats = {"found": 0, "missing": 0, "processed": 0, "errors": 0, "compressed": 0, "total_size_reduction": 0}
         
-        pbar = tqdm(all_txt_files, desc="[V2.0] 数据重构与验证")
-        for txt_file in pbar:
+        for txt_file_path in tqdm(batch_files, desc=f"批次-{batch_id}", leave=False):
             try:
+                txt_file = Path(txt_file_path)
+                
                 with open(txt_file, 'r', encoding='utf-8') as f:
                     lines = f.readlines()
                 
@@ -229,10 +211,10 @@ class TagRestructuringV2:
                 description = lines[1].strip() if len(lines) > 1 else ""
                 original_tags_list = [t.strip() for t in original_tags_str.split(',') if t.strip()]
 
-                # 1. 重排序
+                # 重排序标签
                 reordered_tags_str = self._categorize_and_reorder_tags(original_tags_list)
                 
-                # 2. 计算语义相似度
+                # 计算语义相似度
                 original_emb1 = self._get_embedding(original_tags_str, "te1")
                 reordered_emb1 = self._get_embedding(reordered_tags_str, "te1")
                 sim1 = cosine_similarity(original_emb1, reordered_emb1)[0][0]
@@ -241,48 +223,43 @@ class TagRestructuringV2:
                 reordered_emb2 = self._get_embedding(reordered_tags_str, "te2")
                 sim2 = cosine_similarity(original_emb2, reordered_emb2)[0][0]
 
-                # 3. 计算精确Token长度
+                # 计算Token数量
                 tokens1, tokens2 = self.get_token_counts(reordered_tags_str)
 
-                # 4. 保存重构文件
-                output_txt_file = Path(OUTPUT_DIR) / txt_file.name
+                # 保存处理后的文本文件
+                output_txt_file = Path(output_dir) / txt_file.name
                 with open(output_txt_file, 'w', encoding='utf-8') as f:
-                    # 将标签和描述合并为一行，如果有描述的话
                     if description:
                         combined_content = f"{reordered_tags_str}, {description}"
                     else:
                         combined_content = reordered_tags_str
                     f.write(combined_content)
 
-                # 5. 处理对应的图片文件
+                # 处理图片文件
                 base_name = txt_file.stem
-                source_image = self._find_image_file(base_name, DATA_DIR)
+                source_image = self._find_image_file(base_name, source_dir)
                 
                 process_result = None
                 if source_image:
-                    target_image = Path(OUTPUT_DIR) / source_image.name
+                    target_image = Path(output_dir) / source_image.name
                     process_result = self._process_image(source_image, target_image)
                     image_stats["found"] += 1
                     
                     if "成功" in process_result["status"]:
                         image_stats["processed"] += 1
-                        
-                        # 统计压缩信息
                         if process_result["compressed"]:
                             image_stats["compressed"] += 1
                             original_pixels = process_result["original_size"][0] * process_result["original_size"][1]
                             final_pixels = process_result["final_size"][0] * process_result["final_size"][1]
                             size_reduction = (original_pixels - final_pixels) / original_pixels
                             image_stats["total_size_reduction"] += size_reduction
-                            
                     elif "失败" in process_result["status"]:
                         image_stats["errors"] += 1
                 else:
                     image_stats["missing"] += 1
-                    print(f"[WARNING] 未找到图片文件: {base_name}")
 
-                # 构建详细报告数据
-                report_entry = {
+                # 构建结果记录
+                result_entry = {
                     "filename": txt_file.name,
                     "similarity_te1": float(sim1),
                     "similarity_te2": float(sim2),
@@ -294,125 +271,64 @@ class TagRestructuringV2:
                     "image_status": process_result["status"] if source_image else "未找到"
                 }
                 
-                # 添加图片处理详细信息
                 if process_result and source_image:
-                    report_entry.update({
+                    result_entry.update({
                         "image_compressed": process_result.get("compressed", False),
                         "original_resolution": process_result.get("original_size"),
                         "final_resolution": process_result.get("final_size"),
                         "compression_ratio": process_result.get("scale_factor", 1.0)
                     })
                 
-                report_data.append(report_entry)
+                batch_results.append(result_entry)
 
             except Exception as e:
-                print(f"[ERROR] 处理文件 {txt_file.name} 失败: {e}")
+                print(f"[BATCH-{batch_id} ERROR] 处理文件 {txt_file_path} 失败: {e}")
 
-        # 6. 生成报告
-        self._generate_report(report_data, image_stats)
-
-    def _generate_report(self, report_data, image_stats):
-        """生成最终的量化分析报告"""
-        print("\n" + "="*80)
-        print("📊 SDXL数据重构V2.0 - 最终量化报告")
-        print("="*80)
-
-        if not report_data:
-            print("[ERROR] 没有处理任何文件，无法生成报告。")
-            return
-
-        avg_sim1 = np.mean([d['similarity_te1'] for d in report_data])
-        avg_sim2 = np.mean([d['similarity_te2'] for d in report_data])
-        avg_tokens1 = np.mean([d['tokens_te1'] for d in report_data])
-        avg_tokens2 = np.mean([d['tokens_te2'] for d in report_data])
-        max_tokens1 = max([d['tokens_te1'] for d in report_data])
-        max_tokens2 = max([d['tokens_te2'] for d in report_data])
-
-        print(f"      处理文件总数: {len(report_data)}")
-        print(f"      图片处理模式: 真实复制 + 智能压缩 (最大分辨率: {self.max_resolution}x{self.max_resolution})")
+        # 保存批次结果
+        batch_report = {
+            "batch_id": batch_id,
+            "processed_files": len(batch_results),
+            "image_stats": image_stats,
+            "results": batch_results
+        }
         
-        print("\n--- 图片处理统计 ---")
-        print(f"      找到图片: {image_stats['found']}")
-        print(f"      缺失图片: {image_stats['missing']}")
-        print(f"      成功处理: {image_stats['processed']}")
-        print(f"      处理错误: {image_stats['errors']}")
-        print(f"      配对成功率: {image_stats['found']/(image_stats['found']+image_stats['missing'])*100:.1f}%")
+        batch_output_file = Path(output_dir) / f"batch_{batch_id}_results.json"
+        with open(batch_output_file, 'w', encoding='utf-8') as f:
+            json.dump(batch_report, f, indent=2, ensure_ascii=False)
         
-        print("\n--- 图片压缩统计 ---")
-        print(f"      压缩图片数量: {image_stats['compressed']}")
-        print(f"      压缩率: {image_stats['compressed']/max(image_stats['found'], 1)*100:.1f}%")
-        if image_stats['compressed'] > 0:
-            avg_size_reduction = image_stats['total_size_reduction'] / image_stats['compressed'] * 100
-            print(f"      平均像素减少: {avg_size_reduction:.1f}%")
-        
-        # 分析分辨率分布
-        compressed_images = [d for d in report_data if d.get('image_compressed', False)]
-        if compressed_images:
-            print("\n--- 压缩详情 ---")
-            for img_data in compressed_images[:5]:  # 显示前5个压缩案例
-                orig = img_data['original_resolution']
-                final = img_data['final_resolution']
-                ratio = img_data['compression_ratio']
-                print(f"      {img_data['filename']}: {orig[0]}x{orig[1]} → {final[0]}x{final[1]} (缩放: {ratio:.3f})")
-            if len(compressed_images) > 5:
-                print(f"      ... 还有 {len(compressed_images)-5} 个压缩案例")
-        
-        print("\n--- 语义保真度 (越高越好) ---")
-        print(f"      TE1 平均相似度: {avg_sim1:.4f}")
-        print(f"      TE2 平均相似度: {avg_sim2:.4f}")
-        print(f"      综合平均相似度: {(avg_sim1 + avg_sim2) / 2:.4f}")
-        
-        print("\n--- Token长度分析 (越低越好) ---")
-        print(f"      TE1 平均Token数: {avg_tokens1:.1f} (最大: {max_tokens1})")
-        print(f"      TE2 平均Token数: {avg_tokens2:.1f} (最大: {max_tokens2})")
-
-        # 将报告保存到JSON文件
-        report_path = "data_reconstruction_report_v2.json"
-        with open(report_path, 'w', encoding='utf-8') as f:
-            json.dump({
-                "summary": {
-                    "file_count": len(report_data),
-                    "processing_mode": f"真实复制 + 智能压缩 (最大分辨率: {self.max_resolution}x{self.max_resolution})",
-                    "image_stats": image_stats,
-                    "compression_stats": {
-                        "compressed_count": image_stats['compressed'],
-                        "compression_rate": image_stats['compressed']/max(image_stats['found'], 1)*100,
-                        "avg_size_reduction": image_stats['total_size_reduction'] / max(image_stats['compressed'], 1) * 100
-                    },
-                    "avg_similarity_te1": avg_sim1,
-                    "avg_similarity_te2": avg_sim2,
-                    "avg_tokens_te1": avg_tokens1,
-                    "max_tokens_te1": max_tokens1,
-                    "avg_tokens_te2": avg_tokens2,
-                    "max_tokens_te2": max_tokens2
-                },
-                "details": report_data
-            }, f, indent=2, ensure_ascii=False)
-        
-        print(f"\n[SUCCESS] V2.0数据重构完成！详细报告已保存至: {report_path}")
-        print("="*80)
+        print(f"[BATCH-{batch_id}] 完成，已处理 {len(batch_results)} 个文件")
+        return batch_report
 
 
 def parse_arguments():
     """解析命令行参数"""
-    parser = argparse.ArgumentParser(description="SDXL数据重构工具 V2.0 - 集成标签重排序和智能图片压缩")
-    parser.add_argument("--data-dir", default=DATA_DIR,
-                       help=f"源数据目录 (默认: {DATA_DIR})")
-    parser.add_argument("--output-dir", default=OUTPUT_DIR,
-                       help=f"输出目录 (默认: {OUTPUT_DIR})")
+    parser = argparse.ArgumentParser(description="批次处理器 - 处理单个批次的标签文件")
+    parser.add_argument("--batch-files", required=True,
+                       help="批次文件列表，逗号分隔")
+    parser.add_argument("--source-dir", required=True,
+                       help="源数据目录")
+    parser.add_argument("--output-dir", required=True,
+                       help="输出目录")
+    parser.add_argument("--batch-id", type=int, required=True,
+                       help="批次ID")
+    parser.add_argument("--max-resolution", type=int, default=5000,
+                       help="图片最大分辨率")
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_arguments()
     
-    # 更新全局配置
-    DATA_DIR = args.data_dir
-    OUTPUT_DIR = args.output_dir
+    # 解析批次文件列表
+    batch_files = [f.strip() for f in args.batch_files.split(',') if f.strip()]
     
-    print(f"[INFO] 源数据目录: {DATA_DIR}")
-    print(f"[INFO] 输出目录: {OUTPUT_DIR}")
-    print(f"[INFO] 最大分辨率限制: 5000x5000 (默认)")
+    print(f"[BATCH-{args.batch_id}] 启动批次处理器")
+    print(f"[BATCH-{args.batch_id}] 文件数量: {len(batch_files)}")
+    print(f"[BATCH-{args.batch_id}] 源目录: {args.source_dir}")
+    print(f"[BATCH-{args.batch_id}] 输出目录: {args.output_dir}")
     
-    restructurer = TagRestructuringV2()
-    restructurer.run() 
+    # 创建处理器并执行
+    processor = BatchProcessor(max_resolution=args.max_resolution)
+    result = processor.process_batch(batch_files, args.source_dir, args.output_dir, args.batch_id)
+    
+    print(f"[BATCH-{args.batch_id}] 批次处理完成") 
